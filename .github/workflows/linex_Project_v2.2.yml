@@ -1,0 +1,155 @@
+name: Limitless Compiler v2.2
+# linex Project
+
+on:
+  workflow_dispatch:
+    inputs:
+      zip_name:
+        description: 'Zip Name'
+        required: true
+        default: '4.9-kernel'
+      kernel_source:
+        description: 'Kernel Source'
+        required: true
+        default: 'https://github.com/ThRE-Team/android_kernel_xiaomi_sdm845.git'
+      kernel_branch:
+        description: 'Kernel Branch'
+        required: true
+        default: 'lineage-22.2-next'
+      defconfig:
+        description: 'defconfig'
+        required: true
+        default: 'vendor/xiaomi/mi845_defconfig'
+      ksu_url:
+        description: 'KernelSU | false for disable'
+        required: false
+        default: 'curl -LSs https://raw.githubusercontent.com/ThRE-Team/KernelSU-Next/main/kernel/setup.sh | bash -s v3.2.0'
+      clang_url:
+        description: 'Clang | false for disable'
+        required: false
+        default: 'https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/9b144befdfd93b90e02c663504fb9f4b95f9faf8/clang-r596125.tar.gz'
+      tweak_pre_build_cmd:
+        description: 'Tweak Pre Build'
+        required: false
+        default: 'echo "Starting kernel compilation! $(date)"'
+      tweak_after_build_cmd:
+        description: 'Tweak After Build'
+        required: false
+        default: 'echo "Compilation completed! $(date)"'
+
+jobs:
+  limitless-compiler:
+    name: ${{ github.event.inputs.zip_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Input
+        run: |
+          sudo timedatectl set-timezone Asia/Jakarta
+          echo "zip_name: ${{ github.event.inputs.zip_name }}"
+          echo "kernel_source: ${{ github.event.inputs.kernel_source }}"
+          echo "kernel_branch: ${{ github.event.inputs.kernel_branch }}"
+          echo "defconfig: ${{ github.event.inputs.defconfig }}"
+          echo "ksu_url: ${{ github.event.inputs.ksu_url }}"
+          echo "clang_url: ${{ github.event.inputs.clang_url }}"
+          echo "tweak_pre_build_cmd: ${{ github.event.inputs.tweak_pre_build_cmd }}"
+          echo "tweak_after_build_cmd: ${{ github.event.inputs.tweak_after_build_cmd }}"
+          
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc build-essential flex bison ca-certificates clang lld llvm \
+            libssl-dev libelf-dev cpio curl git unzip wget \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            g++-aarch64-linux-gnu g++-arm-linux-gnueabi \
+            libncurses5-dev libncursesw5-dev
+
+      - name: Setup Custom Clang Environment
+        run: |
+          if [ "${{ github.event.inputs.clang_url }}" == "ThRE" ]; then
+            echo "Mengunduh ThRE Weave Clang..."
+            mkdir -p ~/clang-ext
+            curl -Lo clang.tar.gz "${{ secrets.THRE_CLANG }}"
+            tar -xzf clang.tar.gz -C ~/clang-ext
+          elif [ "${{ github.event.inputs.clang_url }}" != "false" ]; then
+            echo "Mengunduh Clang Kustom dari input..."
+            mkdir -p ~/clang-ext
+            curl -Lo clang.tar.gz "${{ github.event.inputs.clang_url }}"
+            tar -xzf clang.tar.gz -C ~/clang-ext
+          else
+            echo "Menggunakan Clang bawaan sistem Ubuntu..."
+          fi
+
+      - name: Clone Kernel Source
+        run: |
+          git clone --depth=1 "${{ github.event.inputs.kernel_source }}" -b "${{ github.event.inputs.kernel_branch }}" kernel-src
+
+      - name: Setup KernelSU
+        run: |
+          if [ "${{ github.event.inputs.ksu_url }}" != "false" ]; then
+            cd kernel-src
+            ${{ github.event.inputs.ksu_url }}
+          fi
+
+      - name: Compile Kernel
+        env:
+          KBUILD_BUILD_USER: "linex"
+          KBUILD_BUILD_HOST: "Project"
+        run: |
+          cd kernel-src
+          
+          OUT_DIR="out"
+          K_FLAGS="-fcommon -Qunused-arguments -Wno-everything"
+          
+          if [ "${{ github.event.inputs.clang_url }}" != "false" ]; then
+            export PATH="$HOME/clang-ext/bin:$PATH"
+          fi
+          
+          MAKE_ARGS=(
+            O=$OUT_DIR
+            ARCH=arm64
+            CC=clang
+            LD=ld.lld
+            AR=llvm-ar
+            NM=llvm-nm
+            OBJCOPY=llvm-objcopy
+            OBJDUMP=llvm-objdump
+            STRIP=llvm-strip
+            READELF=llvm-readelf
+            CLANG_TRIPLE=aarch64-linux-gnu-
+            CROSS_COMPILE=aarch64-linux-gnu-
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+            LLVM=1
+            LLVM_IAS=1
+          )
+          
+          mkdir -p $OUT_DIR
+          
+          make "${MAKE_ARGS[@]}" ${{ github.event.inputs.defconfig }}
+          
+          ${{ github.event.inputs.tweak_pre_build_cmd }}
+          
+          ${{ secrets.TWEAK_PRE_BUILD_CMD }}
+          
+          make "${MAKE_ARGS[@]}" olddefconfig
+          
+          ${{ secrets.LIMITLESS_ADDON }}
+          
+          make -j$(nproc --all) "${MAKE_ARGS[@]}" KCFLAGS="$K_FLAGS" EXTRA_CFLAGS="$K_FLAGS"
+          
+          ${{ github.event.inputs.tweak_after_build_cmd }}
+          ${{ secrets.TWEAK_AFTER_BUILD_CMD }}
+          
+      - name: Upload Image.gz-dtb
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.zip_name }}-gz-dtb
+          path: kernel-src/out/arch/arm64/boot/Image.gz-dtb
+          if-no-files-found: ignore
+          
+      - name: Upload Image Only
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.zip_name }}-raw
+          path: kernel-src/out/arch/arm64/boot/Image
+          if-no-files-found: ignore
