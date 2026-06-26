@@ -274,8 +274,7 @@ jobs:
           cd kernel-src
 
           # Download script patch dari Gist lalu jalankan
-          curl -LSs https://gist.githubusercontent.com/miuieskaes-dev/4e4324e7fe8a0b695436d599c46aa3d9/raw/d8126c77b29677bd7fe97f4adde4a7f190da471e/ksu_hooks_patch.sh | bash
-
+          curl -LSs https://gist.githubusercontent.com/miuieskaes-dev/4e4324e7fe8a0b695436d599c46aa3d9/raw/ksu_hooks_patch.sh | python3
       - name: Compile Kernel
         env:
           KBUILD_BUILD_USER: "linex"
